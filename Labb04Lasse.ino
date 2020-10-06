@@ -34,7 +34,7 @@ bool isButton1ActivatedBySerial = false;
 String textString = "";
 char letterReadFromSerialMonitor = 0;
 
-bool startFading = false;
+//bool startFading = false;                                               TA BORT NÄR STATES E KLART
 bool isFirstTimeFade = true;
 bool isInEnterFadeValueMode = false;
 bool isSerialFadeMode = false;
@@ -47,19 +47,35 @@ volatile int lastInterruptButtonState;
 
 enum STATES{
   FADE_STATE = 1,
-  STOP_LIGHT_STATE = 2,
-  REGULAR_CHANGELIGHT_STATE = 3,
-  INTERRUPT_STATE = 4
+  STOPPED_LIGHTS_STATE = 2,
+  REGULAR_CHANGELIGHT_STATE = 3,                                                /// LÄGG TILL 3 LIKADANA STATES MEN FÖR SERIAL INPUT
 };
+enum STATES currentEnumState;
 
 void setup() {
   initSetup();
 }
 void loop() { 
+
   checkForInput_ShowOutput();
   changeToNextLightColor();
   completeFadeMode();
 }
+ 
+String getCurrentActiveState(){
+  String returnStringFromEnumFunction = "";
+  if(currentEnumState == FADE_STATE){
+    returnStringFromEnumFunction = "Current state: FADE_STATE";
+  }
+  else if (currentEnumState == REGULAR_CHANGELIGHT_STATE) {
+    returnStringFromEnumFunction = "Current state: REGULAR_CHANGELIGHT_STATE";
+  }
+  else if (currentEnumState == STOPPED_LIGHTS_STATE) {
+    returnStringFromEnumFunction = "Current state: STOPPED_LIGHTS_STATE";
+  }
+  return returnStringFromEnumFunction;
+}
+
 void initSetup(){
   pinMode(key1Pin, INPUT);
   pinMode(key2Pin, INPUT);
@@ -103,14 +119,17 @@ void checkForInput_ShowOutput(){
     }
     else {
       if(textString.equals("startfade")){
-        startFading = true;
-        Serial.println(F("Fade is ongoing."));
+        currentEnumState = FADE_STATE;
+        //startFading = true;                                                     // KAN TAS BORT NÄR STATES E KLART?`???
+        Serial.println(getCurrentActiveState());
         // EFTER JAG AKTIVERAT FADE GENOM SERIELMONITOR SÅ BLINKAR DEN SOM FAN
       }
       else if(textString.equals("stoplight")){
-        startFading = false;
+        currentEnumState = STOPPED_LIGHTS_STATE;
+        Serial.println(getCurrentActiveState());
+        //startFading = false;                                                  // KAN TAS BORT NÄR STATES E KLART?`???
         turnOffAllLightsOnce(); 
-        Serial.println(F("Lights stopped."));
+        //Serial.println(F("Lights stopped."));  //ta bort, använder states
       }
       else if(textString.equals("fadespeed") && isInEnterFadeValueMode == false){
         isInEnterFadeValueMode = true;
@@ -119,28 +138,31 @@ void checkForInput_ShowOutput(){
       else if(isInEnterFadeValueMode == true && textString.toInt() >= 1 && textString.toInt() <= 50){ 
           serialPotVal = textString.toInt();
           Serial.print(F("Fade speed set to: "));    
-          Serial.println(serialPotVal);                                                       // det låg INTE här, måste vara i fade?????
+          Serial.println(serialPotVal);                                                       
           isSerialPotValActive = true;
           isInEnterFadeValueMode = false;         
       }     
       else if(textString.equals("changelight")){
+        currentEnumState = REGULAR_CHANGELIGHT_STATE;
+        Serial.println(getCurrentActiveState());
         isButton1ActivatedBySerial = true;
-        Serial.print(F("Light changed to: ")); 
-        textString = lampNumberToName(currentActiveLed); 
-        Serial.println(textString);
       }
       else if(textString.equals("help")){
         welcomeAndHelpScreen();
       }
       else if(textString.equals("interrupt")){
         interruptFunction();
+      }     
+      else if(textString.equals("getstate")){
+      Serial.println(getCurrentActiveState());
       }
       // Clearing our string :)
       textString = ""; 
     }
   }
 }
-String lampNumberToName(int currentActiveLedInput){
+
+String lampNumberToName(int currentActiveLedInput){ // DENNA ANVÄNDS INTE DÅ JA PRINTAR UT STATES. KANSKE KAN ANVÄNDA IN FUTURE?
   String returnString = "";
   if(currentActiveLedInput == 9){
     returnString = "Green";
@@ -184,7 +206,7 @@ void completeFadeMode(){
     // whatever the reading is at, it's been there for longer than the debounce
     // delay, so take it as the actual current state:
     // if the button state has changed:
-    if(startFading == true){
+    if(currentEnumState == FADE_STATE/*startFading == true*/){                                                        // NÄR STATES ÄR KLART TA BORT startfading == true
       
       if(isFirstTimeFade == true){
         turnOffAllLightsOnce();
@@ -232,7 +254,9 @@ void completeFadeMode(){
       button2State = key2reading;      
       // only toggle the LED if the new button state is HIGH     
       if (button2State == HIGH) {
-        startFading = true;   
+        //startFading = true;                                                                                     // NÄR STATES ÄR KLART TA BORT DENNA                           
+        currentEnumState = FADE_STATE;  
+        Serial.println(getCurrentActiveState());
       }     
     }
   }
@@ -258,11 +282,14 @@ void changeToNextLightColor(){
     // if the button state has changed:
     if (key1reading != button1State || isButton1ActivatedBySerial == true) {
       button1State = key1reading;  
+      currentEnumState = REGULAR_CHANGELIGHT_STATE;                                         // SKA STATE VERKLIGEN VARA HÄR????
       // only toggle the LED if the new button state is HIGH
-      if (button1State == HIGH || isButton1ActivatedBySerial == true) {
+      if (button1State == HIGH && currentEnumState == REGULAR_CHANGELIGHT_STATE || isButton1ActivatedBySerial == true) { // ÄNDRA SERIALBUTTON TILL EN EGEN STATE IST FÖR true
         activateOneLedOnly(currentActiveLed); 
         analogWrite(currentActiveLed, maxLedVal);
-        startFading = false;
+                                                   
+        Serial.println(getCurrentActiveState());
+        //startFading = false;                                                                                  // NÄR STATES ÄR KLART TA BORT DENNA
         isFirstTimeFade = true; 
       }
       // whenever you release your button the active led will increment(unless 11 then -> 9)
@@ -299,28 +326,26 @@ void activateOneLedOnly(int ledToActivate){
 }
 int newFadeLight(int ledToFadeInput, int ledValueToChange){
   
+  if(ledValueToChange >= maxLedVal){
+    isIncrementing = false;
+  }
+  else if(ledValueToChange <= 1){
+    isIncrementing = true;
+  }
 
-    if(ledValueToChange >= maxLedVal){
-      isIncrementing = false;
-    }
-    else if(ledValueToChange <= 1){
-      isIncrementing = true;
-    }
-
-
-    if(isIncrementing == true){
-      ledValueToChange ++;
-        if(ledValueToChange >= maxLedVal){
-          ledValueToChange = maxLedVal;
-        }
-    }
-    else if(isIncrementing == false){
-      ledValueToChange --;
-      if(ledValueToChange <= 1){
-        ledValueToChange = 1;
+  if(isIncrementing == true){
+    ledValueToChange ++;
+      if(ledValueToChange >= maxLedVal){
+        ledValueToChange = maxLedVal;
       }
-    } 
-    analogWrite(ledToFadeInput, ledValueToChange);
-    return ledValueToChange; 
+  }
+  else if(isIncrementing == false){
+    ledValueToChange --;
+    if(ledValueToChange <= 1){
+      ledValueToChange = 1;
+    }
+  } 
+  analogWrite(ledToFadeInput, ledValueToChange);
+  return ledValueToChange; 
 }
 
