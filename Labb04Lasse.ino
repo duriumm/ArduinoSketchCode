@@ -1,12 +1,7 @@
-int potMeterPin = 0;
-int key1Pin = 8;
-int key2Pin = 12;
-int greenLed = 9;
-int blueLed = 10;
-int redLed = 11;
+#include "config.h"
+
 int currentActiveLed = 9;
 
-unsigned long previousMillis = 0; 
 int lightFadeInterval = 10;
 int maxLedVal = 50;
 int key1State = LOW;
@@ -14,6 +9,7 @@ int key2State = LOW;
 int potVal = 0;
 int serialPotVal = 0;
 int previousPotVal = 0;
+
 int valToChangeGreen = 1;
 int valToChangeRed = 1;
 int valToChangeBlue = 0;
@@ -26,47 +22,68 @@ int lastButton1State = LOW;
 int button2State;
 int lastButton2State = LOW;
 
-unsigned long key1LastDebounceTime = 0;  // the last time the output pin was toggled
+unsigned long previousMillis = 0; 
+unsigned long key1LastDebounceTime = 0;  
 unsigned long key2LastDebounceTime = 0;
-unsigned long debounceDelay = 30;    // the debounce time; increase if the output flickers
+unsigned long debounceDelay = 30;  
 
-bool startFading = false;
-bool isFirstTimeFade = true;
 bool isSerialPotValActive = false;
-
-long randNumber;
-
-int incomingByte = 0; // for incoming serial data
-
 bool isReadingFromSerial = false;
+bool isButton1ActivatedBySerial = false;
 
 String textString = "";
 char letterReadFromSerialMonitor = 0;
 
+bool startFading = false;
+bool isFirstTimeFade = true;
 bool isInEnterFadeValueMode = false;
 bool isSerialFadeMode = false;
-
 bool isRedLedReadyToFade = false;
 bool isGreenLedReadyToFade = false;
 bool isBlueLedReadyToFade = false;
 
-bool isButton1ActivatedBySerial = false;
+volatile int interruptButtonState = 0; 
+volatile int lastInterruptButtonState;  
 
+enum STATES{
+  FADE_STATE = 1,
+  STOP_LIGHT_STATE = 2,
+  REGULAR_CHANGELIGHT_STATE = 3,
+  INTERRUPT_STATE = 4
+};
 
 void setup() {
+  initSetup();
+}
+void loop() { 
+  checkForInput_ShowOutput();
+  changeToNextLightColor();
+  completeFadeMode();
+}
+void initSetup(){
   pinMode(key1Pin, INPUT);
   pinMode(key2Pin, INPUT);
+  pinMode(interruptButtonPin, INPUT);
+  attachInterrupt(0, interruptFunction, RISING);
   pinMode(greenLed, OUTPUT);
   pinMode(blueLed, OUTPUT);
   pinMode(redLed, OUTPUT);
-  //randomSeed(analogRead(1));
   Serial.begin(9600);
   welcomeAndHelpScreen();
 }
-void loop() { 
-  checkForInput();
-  changeToNextLightColor();
-  completeFadeMode();
+void interruptFunction() {
+  interruptButtonState = digitalRead(interruptButtonPin);
+  static unsigned long last_interrupt_time = 0;
+  unsigned long interrupt_time = millis();
+  // If interrupts come faster than 200ms, assume it's a bounce and ignore
+  if (interrupt_time - last_interrupt_time > 200) {
+    //turnOffAllLightsOnce();
+    Serial.println("VI INTERRUPTADE NU"); 
+  }
+  last_interrupt_time = interrupt_time;
+  //lastInterruptButtonState = interruptButtonState;
+  interruptButtonState = LOW;
+  
 }
 void welcomeAndHelpScreen(){
   Serial.println(F("\n\n"));
@@ -76,7 +93,7 @@ void welcomeAndHelpScreen(){
   "Turn lights off: stoplight\nShow this helpscreen again: help\n"));
   
 }
-void checkForInput(){
+void checkForInput_ShowOutput(){
   if (Serial.available() > 0) {    // is a character available?
     letterReadFromSerialMonitor = Serial.read();       // get the character
     
@@ -85,10 +102,6 @@ void checkForInput(){
       textString += letterReadFromSerialMonitor;
     }
     else {
-      // end of string
-      /*Serial.print("This is your text: ");
-      Serial.println(textString);
-      */
       if(textString.equals("startfade")){
         startFading = true;
         Serial.println(F("Fade is ongoing."));
@@ -96,15 +109,15 @@ void checkForInput(){
       }
       else if(textString.equals("stoplight")){
         startFading = false;
-        turnOffAllLightsOnce(); // NÄR MAN SKRIVER STOPFADE SÅ SKA LAMPORNA STÄNGAS OCH INTE BA PAUSAS
+        turnOffAllLightsOnce(); 
         Serial.println(F("Lights stopped."));
       }
       else if(textString.equals("fadespeed") && isInEnterFadeValueMode == false){
         isInEnterFadeValueMode = true;
         Serial.println("Enter a number between 1 and 50 to set fade speed: ");
       }
-      else if(isInEnterFadeValueMode == true && textString.toInt() >= 1 && textString.toInt() <= 50){ //JAG TRODDE FLICKERING PROBLEMET LÅG HÄR!!!
-          serialPotVal = textString.toInt();   
+      else if(isInEnterFadeValueMode == true && textString.toInt() >= 1 && textString.toInt() <= 50){ 
+          serialPotVal = textString.toInt();
           Serial.print(F("Fade speed set to: "));    
           Serial.println(serialPotVal);                                                       // det låg INTE här, måste vara i fade?????
           isSerialPotValActive = true;
@@ -119,7 +132,10 @@ void checkForInput(){
       else if(textString.equals("help")){
         welcomeAndHelpScreen();
       }
-      // clear the string for reuse
+      else if(textString.equals("interrupt")){
+        interruptFunction();
+      }
+      // Clearing our string :)
       textString = ""; 
     }
   }
@@ -157,8 +173,6 @@ void completeFadeMode(){
       previousPotVal = analogRead(potMeterPin);
       isSerialPotValActive = false;
     }    
-    //Serial.print("analog read potval: ");
-    //Serial.println(analogRead(potMeterPin)); 
   }
       // read the state of the switch into a local variable:
   int key2reading = digitalRead(key2Pin);
@@ -178,7 +192,6 @@ void completeFadeMode(){
         valToChangeBlue = 2;
         isFirstTimeFade = false;
       }
-
       // WE COULD MAKE ALL SEPERATE LEDS INTO FUNCTIONS INSTEAD. DO IT WHEN U HAVE TIME!!!
 
       // BLUE LED STARTING // BLUE LED STARTING // BLUE LED STARTING // BLUE LED STARTING
