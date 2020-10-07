@@ -12,10 +12,11 @@ int previousPotVal = 0;
 
 int valToChangeGreen = 1;
 int valToChangeRed = 1;
-int valToChangeBlue = 0;
+int valToChangeBlue = 1;                                                        // denna var 0 från början, se om det blir probs med 1/1/1/
 
 bool isIncrementing = true;
 bool key1IsReady = false;
+bool isFirstTimeInSpecialState = true;
 
 int button1State; 
 int lastButton1State = LOW;
@@ -45,10 +46,14 @@ bool isBlueLedReadyToFade = false;
 volatile int interruptButtonState = 0; 
 volatile int lastInterruptButtonState;  
 
+bool isBlueSirenActive = true;
+int sirenCounter = 0;
+
 enum STATES{
   FADE_STATE = 1,
   STOPPED_LIGHTS_STATE = 2,
-  REGULAR_CHANGELIGHT_STATE = 3,                                                /// LÄGG TILL 3 LIKADANA STATES MEN FÖR SERIAL INPUT
+  REGULAR_CHANGELIGHT_STATE = 3,                                              
+  SPECIAL_STATE = 4,
 };
 enum STATES currentEnumState;
 
@@ -60,6 +65,7 @@ void loop() {
   checkForInput_ShowOutput();
   changeToNextLightColor();
   completeFadeMode();
+  specialStateFunction();
 }
  
 String getCurrentActiveState(){
@@ -73,6 +79,9 @@ String getCurrentActiveState(){
   else if (currentEnumState == STOPPED_LIGHTS_STATE) {
     returnStringFromEnumFunction = "Current state: STOPPED_LIGHTS_STATE";
   }
+  else if (currentEnumState == SPECIAL_STATE) {
+    returnStringFromEnumFunction = "Current state: SPECIAL_STATE";
+  }
   return returnStringFromEnumFunction;
 }
 
@@ -85,7 +94,75 @@ void initSetup(){
   pinMode(blueLed, OUTPUT);
   pinMode(redLed, OUTPUT);
   Serial.begin(9600);
+  currentEnumState = STOPPED_LIGHTS_STATE;
   welcomeAndHelpScreen();
+}
+
+void setAllLightIntegerValuesTo_2_(){
+  valToChangeGreen = 2;
+  valToChangeRed = 2;
+  valToChangeBlue = 2;
+}
+void specialStateFunction(){
+
+  if(currentEnumState == SPECIAL_STATE){
+    if(isFirstTimeInSpecialState == true && sirenCounter < 3){
+      setAllLightIntegerValuesTo_2_();
+      turnOffAllLightsOnce();
+      isFirstTimeInSpecialState = false;
+      isIncrementing = true;
+    }
+    if(millis() - previousMillis > 5 && sirenCounter < 3){
+         // Serial.print("is BLUE siren active??: ");
+          //Serial.println(isBlueSirenActive);
+      if(isBlueSirenActive == true){
+        valToChangeBlue = newFadeLight(blueLed,valToChangeBlue);
+       
+        if(valToChangeBlue == 1){
+          isBlueSirenActive = false;
+          isIncrementing = true;
+        }
+      }
+      else if(isBlueSirenActive == false){
+        valToChangeRed = newFadeLight(redLed, valToChangeRed);
+        if(valToChangeRed == 1){
+          isBlueSirenActive = true;
+          isIncrementing = true;
+          sirenCounter++;
+        }
+      }  
+      previousMillis = millis();  
+      //Serial.println(sirenCounter);       
+    } 
+    
+    else if(sirenCounter > 2){
+      if(isFirstTimeInSpecialState == false){
+        analogWrite(blueLed, maxLedVal);
+        isFirstTimeInSpecialState = true;
+      }
+      if(millis() - previousMillis > 200){  
+        if(isBlueSirenActive == true){
+          analogWrite(blueLed, 0);
+          analogWrite(redLed, maxLedVal);
+          isBlueSirenActive = false;
+        }
+        else if(isBlueSirenActive == false){
+          analogWrite(redLed, 0);
+          analogWrite(blueLed, maxLedVal);
+          isBlueSirenActive = true;
+          sirenCounter++;
+        }       
+        previousMillis = millis();
+      } 
+    } 
+    if(sirenCounter >= 10){
+      sirenCounter = 0;
+      isFirstTimeInSpecialState = true;
+    }  
+  }
+  else if(currentEnumState != SPECIAL_STATE){
+    isFirstTimeInSpecialState = true;
+  }
 }
 void interruptFunction() {
   interruptButtonState = digitalRead(interruptButtonPin);
@@ -93,8 +170,8 @@ void interruptFunction() {
   unsigned long interrupt_time = millis();
   // If interrupts come faster than 200ms, assume it's a bounce and ignore
   if (interrupt_time - last_interrupt_time > 200) {
-    //turnOffAllLightsOnce();
-    Serial.println("VI INTERRUPTADE NU"); 
+    currentEnumState = SPECIAL_STATE;
+    Serial.println(getCurrentActiveState());
   }
   last_interrupt_time = interrupt_time;
   //lastInterruptButtonState = interruptButtonState;
@@ -102,11 +179,13 @@ void interruptFunction() {
   
 }
 void welcomeAndHelpScreen(){
-  Serial.println(F("\n\n"));
-  Serial.println(F("Hello! This is the help screen. Type in the text string to give your command, when you are ready to send, press ctrl+Enter."));
+  Serial.println(F("\n\n------------------------------------------------------------------------"));
+  Serial.println(F("Hello! This is the help screen. Type in the text string to give one of the available commands shown below.\nWhen you are ready to send, press ctrl+Enter.\n"));
   Serial.println(F("Change the light color: changelight\nStart fadelight mode: startfade\n"
   "Change fade pulse speed: fadespeed  ,and follow the instructions on screen.\n"
-  "Turn lights off: stoplight\nShow this helpscreen again: help\n"));
+  "Turn lights off: stoplight\n"
+  "Activate interrupt: interrupt\n"
+  "Show this helpscreen again: help\n------------------------------------------------------------------------"));
   
 }
 void checkForInput_ShowOutput(){
@@ -120,16 +199,12 @@ void checkForInput_ShowOutput(){
     else {
       if(textString.equals("startfade")){
         currentEnumState = FADE_STATE;
-        //startFading = true;                                                     // KAN TAS BORT NÄR STATES E KLART?`???
         Serial.println(getCurrentActiveState());
-        // EFTER JAG AKTIVERAT FADE GENOM SERIELMONITOR SÅ BLINKAR DEN SOM FAN
       }
       else if(textString.equals("stoplight")){
         currentEnumState = STOPPED_LIGHTS_STATE;
         Serial.println(getCurrentActiveState());
-        //startFading = false;                                                  // KAN TAS BORT NÄR STATES E KLART?`???
         turnOffAllLightsOnce(); 
-        //Serial.println(F("Lights stopped."));  //ta bort, använder states
       }
       else if(textString.equals("fadespeed") && isInEnterFadeValueMode == false){
         isInEnterFadeValueMode = true;
@@ -181,7 +256,7 @@ void turnOffAllLightsOnce(){
   analogWrite(blueLed, 0);
 }
 void completeFadeMode(){
-  unsigned long currentMillis = millis(); // not used huh?? remove??
+  unsigned long currentMillis = millis(); 
   if(isSerialPotValActive == false){
     potVal = analogRead(potMeterPin);
     potVal = map(potVal, 0, 1023, 50, 1);
@@ -190,7 +265,7 @@ void completeFadeMode(){
     potVal = serialPotVal;
     previousPotVal = analogRead(potMeterPin);
     
-    //if(previousPotVal < (analogRead(potMeterPin) - 5) || previousPotVal > (analogRead(potMeterPin) + 5)){ // funkar också?? wtf
+    //if(previousPotVal < (analogRead(potMeterPin) - 5) || previousPotVal > (analogRead(potMeterPin) + 5)){ // funkar också
     if(abs(analogRead(potMeterPin) - previousPotVal > 5)){
       previousPotVal = analogRead(potMeterPin);
       isSerialPotValActive = false;
@@ -206,7 +281,7 @@ void completeFadeMode(){
     // whatever the reading is at, it's been there for longer than the debounce
     // delay, so take it as the actual current state:
     // if the button state has changed:
-    if(currentEnumState == FADE_STATE/*startFading == true*/){                                                        // NÄR STATES ÄR KLART TA BORT startfading == true
+    if(currentEnumState == FADE_STATE){                                                  
       
       if(isFirstTimeFade == true){
         turnOffAllLightsOnce();
@@ -253,8 +328,7 @@ void completeFadeMode(){
     if (key2reading != button2State) {
       button2State = key2reading;      
       // only toggle the LED if the new button state is HIGH     
-      if (button2State == HIGH) {
-        //startFading = true;                                                                                     // NÄR STATES ÄR KLART TA BORT DENNA                           
+      if (button2State == HIGH) {                           
         currentEnumState = FADE_STATE;  
         Serial.println(getCurrentActiveState());
       }     
@@ -263,6 +337,7 @@ void completeFadeMode(){
   // save the reading. Next time through the loop, it'll be the lastButtonState:
   lastButton2State = key2reading;
 }
+
 void turnOffLed_1_TurnOnLed_2_(int ledToTurnOff, int ledToTurnOn, bool &ledToDeactivate, bool &ledToActivate){
   analogWrite(ledToTurnOff, 0);
   ledToDeactivate = false;
@@ -282,17 +357,17 @@ void changeToNextLightColor(){
     // if the button state has changed:
     if (key1reading != button1State || isButton1ActivatedBySerial == true) {
       button1State = key1reading;  
-      currentEnumState = REGULAR_CHANGELIGHT_STATE;                                         // SKA STATE VERKLIGEN VARA HÄR????
+      currentEnumState = REGULAR_CHANGELIGHT_STATE;    // SKA STATE VERKLIGEN VARA HÄR????                                 
       // only toggle the LED if the new button state is HIGH
       if (button1State == HIGH && currentEnumState == REGULAR_CHANGELIGHT_STATE || isButton1ActivatedBySerial == true) { // ÄNDRA SERIALBUTTON TILL EN EGEN STATE IST FÖR true
         activateOneLedOnly(currentActiveLed); 
         analogWrite(currentActiveLed, maxLedVal);
-                                                   
-        Serial.println(getCurrentActiveState());
-        //startFading = false;                                                                                  // NÄR STATES ÄR KLART TA BORT DENNA
+        if(isButton1ActivatedBySerial == false){
+          Serial.println(getCurrentActiveState());            // skriver bara ut om det är MANUELL knapptryck. Annars skrivs det ut i inputfunktionen längst upp
+        }                                                   
         isFirstTimeFade = true; 
       }
-      // whenever you release your button the active led will increment(unless 11 then -> 9)
+     // whenever you release your button the active led will increment(unless 11 then -> 9)
      if(button1State == LOW || isButton1ActivatedBySerial == true){
         if(currentActiveLed == 11){
           currentActiveLed = 9;
@@ -304,7 +379,7 @@ void changeToNextLightColor(){
       }    
     }
   }
-  // save the reading. Next time through the loop, it'll be the lastButtonState:
+  // save the reading. Next time through the loop, it will be the lastButtonState:
   lastButton1State = key1reading;
 }
 void activateOneLedOnly(int ledToActivate){
@@ -324,6 +399,7 @@ void activateOneLedOnly(int ledToActivate){
     analogWrite(greenLed, 0);
   }
 }
+
 int newFadeLight(int ledToFadeInput, int ledValueToChange){
   
   if(ledValueToChange >= maxLedVal){
@@ -348,4 +424,5 @@ int newFadeLight(int ledToFadeInput, int ledValueToChange){
   analogWrite(ledToFadeInput, ledValueToChange);
   return ledValueToChange; 
 }
+
 
